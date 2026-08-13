@@ -1,42 +1,56 @@
-name: Build Single File
+name: Build Android APK (Dynamic Injection)
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
+  push:
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        
-    - name: Install dependencies
-      run: npm ci
-      
-    - name: Build single file
-      run: npm run build:single-clean
-      
-    - name: Upload build artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: single-file-build
-        path: dist/
-        retention-days: 30
-        
-    - name: List build output
-      run: |
-        echo "Build completed successfully!"
-        ls -la dist/
-        echo "File size:"
-        du -h dist/index.html
+      - name: 1. 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 2. 配置 Node.js 与 Java 21
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: 3. 安装依赖并强制下载 Capacitor 引擎
+        run: |
+          npm install
+          npm install @capacitor/core @capacitor/android
+          npm install -D @capacitor/cli
+
+      - name: 4. 物理隔离静态资源 (极其关键的改造)
+        # 将根目录下裸奔的网页文件，强制收拢到一个叫 app_www 的文件夹里
+        run: |
+          mkdir app_www
+          # 提取网页所需文件
+          cp *.html *.json *.js *.css app_www/ || true
+          cp -r api config icons js lib netlify scripts utils app_www/ || true
+          # 移除不需要的工程文件
+          rm -f app_www/package*.json app_www/*.toml || true
+
+      - name: 5. 动态生成控制台与 Android 模具
+        run: |
+          npx cap init "MyNewApp" "com.mywebapp.newapp" --web-dir app_www
+          npx cap add android
+
+      - name: 6. 赋予编译权限并生成 APK
+        working-directory: ./android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+
+      - name: 7. 上传最终 APK 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-app-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
