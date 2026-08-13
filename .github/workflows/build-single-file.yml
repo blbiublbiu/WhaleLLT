@@ -1,4 +1,4 @@
-name: Build Android APK (Dynamic Injection)
+name: Build Android APK (Dynamic Injection + Fix Kotlin)
 
 on:
   workflow_dispatch:
@@ -28,14 +28,11 @@ jobs:
           npm install @capacitor/core @capacitor/android
           npm install -D @capacitor/cli
 
-      - name: 4. 物理隔离静态资源 (极其关键的改造)
-        # 将根目录下裸奔的网页文件，强制收拢到一个叫 app_www 的文件夹里
+      - name: 4. 物理隔离静态资源
         run: |
           mkdir app_www
-          # 提取网页所需文件
           cp *.html *.json *.js *.css app_www/ || true
           cp -r api config icons js lib netlify scripts utils app_www/ || true
-          # 移除不需要的工程文件
           rm -f app_www/package*.json app_www/*.toml || true
 
       - name: 5. 动态生成控制台与 Android 模具
@@ -43,13 +40,25 @@ jobs:
           npx cap init "MyNewApp" "com.mywebapp.newapp" --web-dir app_www
           npx cap add android
 
-      - name: 6. 赋予编译权限并生成 APK
+      - name: 6. 强制修复 Kotlin 底层依赖冲突 (物理拔线)
+        # 用 bash 强行往生成的 build.gradle 末尾注入依赖替换规则，解决 Duplicate class 报错
+        run: |
+          echo "
+          configurations.all {
+              resolutionStrategy.dependencySubstitution {
+                  substitute module('org.jetbrains.kotlin:kotlin-stdlib-jdk7') using module('org.jetbrains.kotlin:kotlin-stdlib:1.8.22')
+                  substitute module('org.jetbrains.kotlin:kotlin-stdlib-jdk8') using module('org.jetbrains.kotlin:kotlin-stdlib:1.8.22')
+              }
+          }
+          " >> ./android/app/build.gradle
+
+      - name: 7. 赋予编译权限并生成 APK
         working-directory: ./android
         run: |
           chmod +x ./gradlew
           ./gradlew assembleDebug
 
-      - name: 7. 上传最终 APK 产物
+      - name: 8. 上传最终 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: new-app-apk
